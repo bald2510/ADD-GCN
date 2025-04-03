@@ -6,6 +6,7 @@ from PIL import Image
 import torch
 from torch.utils.data import Dataset
 import pickle
+import random
 
 urls = {'train_img':'http://images.cocodataset.org/zips/train2014.zip',
         'val_img' : 'http://images.cocodataset.org/zips/val2014.zip',
@@ -106,7 +107,8 @@ class COCO2014(Dataset):
         self.transform = transform
         download_coco2014(self.root, phase)
         self.get_anno()
-        self.num_classes = len(self.cat2idx)
+        self.num_classes = len(self.cat2idx) 
+        #self.img_list = random.sample(self.img_list, int(len(self.img_list) * 0.005))
         print('[dataset] COCO2014 classification phase={} number of classes={}  number of images={}'.format(phase, self.num_classes, len(self.img_list)))
 
     def get_anno(self):

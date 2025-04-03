@@ -77,9 +77,8 @@ class Trainer(object):
         self.reset_meters()
 
     def on_end_epoch(self, is_train=False):
-
         if is_train:
-            # maybe you can do something like 'print the training results' here.
+            # map = self.meters['ap_meter'].value().mean()
             return 
         else:
             # map = self.meters['ap_meter'].value().mean()
@@ -139,18 +138,19 @@ class Trainer(object):
 
     def train(self):
         self.initialization(is_train=True)
-
+        print('train from epoch {}'.format(self.start_epoch + 1))
+        print('train to epoch {}'.format(self.end_epoch))
         for epoch in range(self.start_epoch, self.end_epoch):
             self.lr_now = self.adjust_learning_rate()
+            print("training epoch {}".format(epoch + 1))
             print ('Lr: {}'.format(self.lr_now))
-
             self.epoch = epoch
             # train for one epoch
             self.run_iteration(self.train_loader, is_train=True)
-
+            print("Evaluating epoch {}".format(epoch + 1))
             # evaluate on validation set
             score = self.run_iteration(self.val_loader, is_train=False)
-
+            print('recording best score')
             # record best score, save checkpoint and result
             is_best = score > self.best_score
             self.best_score = max(score, self.best_score)
@@ -160,6 +160,7 @@ class Trainer(object):
                 'state_dict': self.model.module.state_dict() if torch.cuda.is_available() else self.model.state_dict(),
                 'best_score': self.best_score
                 }
+            print('saving checkpoint')
             model_dir = self.args.save_dir
             # assert os.path.exists(model_dir) == True
             self.save_checkpoint(checkpoint, model_dir, is_best)
@@ -176,11 +177,12 @@ class Trainer(object):
             data_loader = tqdm(data_loader, desc='Validate')
             self.model.eval()
         else:
+            print('Training')
             self.model.train()
 
         st_time = time.time()
         for i, data in enumerate(data_loader):
-
+            #print('iter: {}'.format(i))
             # measure data loading time
             data_time = time.time() - st_time
             self.meters['data_time'].update(data_time)
@@ -212,7 +214,7 @@ class Trainer(object):
                         datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  self.epoch+1, i, 
                         self.meters['loss'].value(), self.meters['data_time'].value(), 
                         self.meters['batch_time'].value()))
-
+        print('to on_end_epoch')
         return self.on_end_epoch(is_train=is_train)
 
     def validate(self):
@@ -271,3 +273,5 @@ class Trainer(object):
             filename_best = 'output_best.csv'
             res_path_best = os.path.join(model_dir, filename_best)
             shutil.copyfile(res_path, res_path_best)
+
+

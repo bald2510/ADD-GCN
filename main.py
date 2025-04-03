@@ -16,7 +16,6 @@ parser.add_argument('--data_root_dir', default='./datasets/', type=str, help='sa
 parser.add_argument('--image-size', '-i', default=448, type=int)
 parser.add_argument('--epochs', default=50, type=int)
 parser.add_argument('--epoch_step', default=[30, 40], type=int, nargs='+', help='number of epochs to change learning rate')
-# parser.add_argument('--device_ids', default=[0], type=int, nargs='+', help='number of epochs to change learning rate')
 parser.add_argument('-b', '--batch-size', default=16, type=int)
 parser.add_argument('-j', '--num_workers', default=4, type=int, metavar='INT', help='number of data loading workers (default: 4)')
 parser.add_argument('--display_interval', default=200, type=int, metavar='M', help='display_interval')
@@ -32,13 +31,12 @@ parser.add_argument('--data', metavar='NAME', help='dataset name (e.g. COCO2014'
 parser.add_argument('--model_name', type=str, default='ADD_GCN')
 parser.add_argument('--save_dir', default='./checkpoint/COCO2014/', type=str, help='save path')
 
-''' Val or Tese setting '''
+''' Val or Test setting '''
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true', help='evaluate model on validation set')
 parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
 
 
 def main(args):
-
     if args.seed is not None:
         print ('* absolute seed: {}'.format(args.seed))
         random.seed(args.seed)

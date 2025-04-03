@@ -130,7 +130,9 @@ class AveragePrecisionMeter(object):
 
     @staticmethod
     def average_precision(output, target, difficult_examples=True):
-
+        device = output.device
+        target = target.to(device)
+        
         # sort examples
         sorted, indices = torch.sort(output, dim=0, descending=True)
 
@@ -147,7 +149,10 @@ class AveragePrecisionMeter(object):
             total_count += 1
             if label == 1:
                 precision_at_i += pos_count / total_count
-        precision_at_i /= pos_count
+        if pos_count > 0:
+            precision_at_i /= pos_count
+        else:
+            precision_at_i = 0.0
         return precision_at_i
 
     def overall(self):
