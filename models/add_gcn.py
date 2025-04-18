@@ -60,6 +60,50 @@ class DynamicGraphConvolution(nn.Module):
         x = self.forward_dynamic_gcn(x, dynamic_adj)
         return x
 
+class ChannelAttention(nn.Module):
+    def __init__(self, in_planes, ratio=16):
+        super(ChannelAttention, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+
+        self.fc = nn.Sequential(nn.Conv2d(in_planes, in_planes // ratio, 1, bias=False),
+                               nn.ReLU(),
+                               nn.Conv2d(in_planes // ratio, in_planes, 1, bias=False))
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = self.fc(self.avg_pool(x))
+        max_out = self.fc(self.max_pool(x))
+        out = avg_out + max_out
+        return self.sigmoid(out) * x
+
+class SpatialAttention(nn.Module):
+    def __init__(self, kernel_size=7):
+        super(SpatialAttention, self).__init__()
+
+        assert kernel_size in (3, 7), 'kernel size must be 3 or 7'
+        padding = 3 if kernel_size == 7 else 1
+
+        self.conv1 = nn.Conv2d(2, 1, kernel_size, padding=padding, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        out = torch.cat([avg_out, max_out], dim=1)
+        out = self.conv1(out)
+        return self.sigmoid(out) * x
+
+class CBAM(nn.Module):
+    def __init__(self, in_planes, ratio=16, kernel_size=7):
+        super(CBAM, self).__init__()
+        self.ca = ChannelAttention(in_planes, ratio)
+        self.sa = SpatialAttention(kernel_size)
+
+    def forward(self, x):
+        x = self.ca(x)
+        x = self.sa(x)
+        return x
 
 class ADD_GCN(nn.Module):
     def __init__(self, model, num_classes):
@@ -149,3 +193,96 @@ class ADD_GCN(nn.Module):
                 {'params': large_lr_layers, 'lr': lr},
                 ]
 
+
+class ImprovedADD_GCN_CBAM(nn.Module):
+    def __init__(self, model, num_classes):
+        super(ImprovedADD_GCN_CBAM, self).__init__()
+        self.features = nn.Sequential(
+            model.conv1,
+            model.bn1,
+            model.relu,
+            model.maxpool,
+            model.layer1,
+            model.layer2,
+            model.layer3,
+            model.layer4,
+        )
+        self.num_classes = num_classes
+
+        self.fc = nn.Conv2d(model.fc.in_features, num_classes, (1,1), bias=False)
+
+        # self.conv_transform = nn.Conv2d(2048, 1024, (1,1))
+        # self.relu = nn.LeakyReLU(0.2)
+        
+        self.conv_transform = nn.Conv2d(2048, 1024, (1,1))
+        self.relu = nn.LeakyReLU(0.2)
+        self.cbam = CBAM(1024) # Thêm CBAM sau conv_transform
+
+        self.gcn = DynamicGraphConvolution(1024, 1024, num_classes)
+        
+        self.mask_mat = nn.Parameter(torch.eye(self.num_classes).float())
+        self.last_linear = nn.Conv1d(1024, self.num_classes, 1)
+
+        # image normalization
+        self.image_normalization_mean = [0.485, 0.456, 0.406]
+        self.image_normalization_std = [0.229, 0.224, 0.225]
+
+    def forward_feature(self, x):
+        x = self.features(x)
+        return x
+
+    def forward_classification_sm(self, x):
+        """ Get another confident scores {s_m}.
+
+        Shape:
+        - Input: (B, C_in, H, W) # C_in: 2048
+        - Output: (B, C_out) # C_out: num_classes
+        """
+        x = self.fc(x)
+        x = x.view(x.size(0), x.size(1), -1)
+        x = x.topk(1, dim=-1)[0].mean(dim=-1)
+        return x
+
+    def forward_sam(self, x):
+        """ SAM module
+
+        Shape: 
+        - Input: (B, C_in, H, W) # C_in: 2048
+        - Output: (B, C_out, N) # C_out: 1024, N: num_classes
+        """
+        mask = self.fc(x)
+        mask = mask.view(mask.size(0), mask.size(1), -1)
+        mask = torch.sigmoid(mask)
+        mask = mask.transpose(1, 2)
+
+        x = self.conv_transform(x)
+        x = self.cbam(x)
+        x = x.view(x.size(0), x.size(1), -1)
+        x = torch.matmul(x, mask)
+        return x
+
+    def forward_dgcn(self, x):
+        x = self.gcn(x)
+        return x
+
+    def forward(self, x):
+        x = self.forward_feature(x)
+
+        out1 = self.forward_classification_sm(x)
+
+        v = self.forward_sam(x) # B*1024*num_classes
+        z = self.forward_dgcn(v)
+        z = v + z
+
+        out2 = self.last_linear(z) # B*1*num_classes
+        mask_mat = self.mask_mat.detach()
+        out2 = (out2 * mask_mat).sum(-1)
+        return out1, out2
+
+    def get_config_optim(self, lr, lrp):
+        small_lr_layers = list(map(id, self.features.parameters()))
+        large_lr_layers = filter(lambda p:id(p) not in small_lr_layers, self.parameters())
+        return [
+                {'params': self.features.parameters(), 'lr': lr * lrp},
+                {'params': large_lr_layers, 'lr': lr},
+                ]

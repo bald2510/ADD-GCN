@@ -13,39 +13,36 @@ class AverageMeter(object):
         self.reset()
 
     def reset(self):
+        """Resets all metrics to zero"""
         self.val = 0
         self.avg = 0
         self.sum = 0
         self.count = 0
 
     def update(self, val, n=1):
+        """Updates the metrics with a new value"""
         self.val = val
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
     
     def average(self):
+        """Returns the average value"""
         return self.avg
     
     def value(self):
+        """Returns the current value"""
         return self.val
 
     def __str__(self):
+        """String representation of the metrics"""
         fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
         return fmtstr.format(**self.__dict__)
 
 class AveragePrecisionMeter(object):
     """
     The APMeter measures the average precision per class.
-    The APMeter is designed to operate on `NxK` Tensors `output` and
-    `target`, and optionally a `Nx1` Tensor weight where (1) the `output`
-    contains model output scores for `N` examples and `K` classes that ought to
-    be higher when the model is more convinced that the example should be
-    positively labeled, and smaller when the model believes the example should
-    be negatively labeled (for instance, the output of a sigmoid function); (2)
-    the `target` contains only values 0 (for negative examples) and 1
-    (for positive examples); and (3) the `weight` ( > 0) represents weight for
-    each sample.
+    Designed to operate on `NxK` Tensors `output` and `target`.
     """
 
     def __init__(self, difficult_examples=True):
@@ -61,82 +58,80 @@ class AveragePrecisionMeter(object):
 
     def add(self, output, target, filename):
         """
+        Adds new data to the meter.
         Args:
-            output (Tensor): NxK tensor that for each of the N examples
-                indicates the probability of the example belonging to each of
-                the K classes, according to the model. The probabilities should
-                sum to one over all classes
-            target (Tensor): binary NxK tensort that encodes which of the K
-                classes are associated with the N-th input
-                    (eg: a row [0, 1, 0, 1] indicates that the example is
-                         associated with classes 2 and 4)
-            weight (optional, Tensor): Nx1 tensor representing the weight for
-                each example (each weight > 0)
+            output (Tensor): NxK tensor with model output scores.
+            target (Tensor): Binary NxK tensor with ground truth labels.
+            filename (list): List of filenames corresponding to the data.
         """
         if not torch.is_tensor(output):
             output = torch.from_numpy(output)
         if not torch.is_tensor(target):
             target = torch.from_numpy(target)
 
+        # Ensure correct dimensions for output and target
         if output.dim() == 1:
             output = output.view(-1, 1)
         else:
             assert output.dim() == 2, \
-                'wrong output size (should be 1D or 2D with one column \
-                per class)'
+                'wrong output size (should be 1D or 2D with one column per class)'
         if target.dim() == 1:
             target = target.view(-1, 1)
         else:
             assert target.dim() == 2, \
-                'wrong target size (should be 1D or 2D with one column \
-                per class)'
+                'wrong target size (should be 1D or 2D with one column per class)'
         if self.scores.numel() > 0:
             assert target.size(1) == self.targets.size(1), \
                 'dimensions for output should match previously added examples.'
 
-        # make sure storage is of sufficient size
+        # Resize storage if needed
         if self.scores.storage().size() < self.scores.numel() + output.numel():
             new_size = math.ceil(self.scores.storage().size() * 1.5)
             self.scores.storage().resize_(int(new_size + output.numel()))
             self.targets.storage().resize_(int(new_size + output.numel()))
 
-        # store scores and targets
+        # Store scores and targets
         offset = self.scores.size(0) if self.scores.dim() > 0 else 0
         self.scores.resize_(offset + output.size(0), output.size(1))
         self.targets.resize_(offset + target.size(0), target.size(1))
         self.scores.narrow(0, offset, output.size(0)).copy_(output)
         self.targets.narrow(0, offset, target.size(0)).copy_(target)
 
-        self.filenames += filename # record filenames
+        # Record filenames
+        self.filenames += filename
 
     def value(self):
-        """Returns the model's average precision for each class
-        Return:
-            ap (FloatTensor): 1xK tensor, with avg precision for each class k
         """
-
+        Returns the model's average precision for each class.
+        Return:
+            ap (FloatTensor): 1xK tensor with average precision for each class.
+        """
         if self.scores.numel() == 0:
             return 0
         ap = torch.zeros(self.scores.size(1))
         rg = torch.arange(1, self.scores.size(0)).float()
-        # compute average precision for each class
+        # Compute average precision for each class
         for k in range(self.scores.size(1)):
-            # sort scores
             scores = self.scores[:, k]
             targets = self.targets[:, k]
-            # compute average precision
             ap[k] = AveragePrecisionMeter.average_precision(scores, targets, self.difficult_examples)
         return ap
 
     @staticmethod
     def average_precision(output, target, difficult_examples=True):
+        """
+        Computes the average precision for a single class.
+        Args:
+            output (Tensor): Model scores for the class.
+            target (Tensor): Ground truth labels for the class.
+        """
         device = output.device
         target = target.to(device)
         
-        # sort examples
+        # Sort examples by score in descending order
         sorted, indices = torch.sort(output, dim=0, descending=True)
 
-        # Computes prec@i
+        # Compute precision at each rank
         pos_count = 0.
         total_count = 0.
         precision_at_i = 0.
@@ -156,6 +151,9 @@ class AveragePrecisionMeter(object):
         return precision_at_i
 
     def overall(self):
+        """
+        Computes overall metrics (OP, OR, OF1, CP, CR, CF1).
+        """
         if self.scores.numel() == 0:
             return 0
         scores = self.scores.cpu().numpy()
@@ -164,6 +162,11 @@ class AveragePrecisionMeter(object):
         return self.evaluation(scores, targets)
 
     def overall_topk(self, k):
+        """
+        Computes overall metrics using top-k predictions.
+        Args:
+            k (int): Number of top predictions to consider.
+        """
         targets = self.targets.clone().cpu().numpy()
         targets[targets == -1] = 0
         n, c = self.scores.size()
@@ -176,21 +179,28 @@ class AveragePrecisionMeter(object):
         return self.evaluation(scores, targets)
 
     def evaluation(self, scores_, targets_):
+        """
+        Evaluates the model's performance using precision, recall, and F1-score.
+        Args:
+            scores_ (ndarray): Predicted scores.
+            targets_ (ndarray): Ground truth labels.
+        """
+        # Initialize variables to store counts
         n, n_class = scores_.shape
         Nc, Np, Ng = np.zeros(n_class), np.zeros(n_class), np.zeros(n_class)
         for k in range(n_class):
             scores = scores_[:, k]
             targets = targets_[:, k]
             targets[targets == -1] = 0
-            Ng[k] = np.sum(targets == 1)
-            Np[k] = np.sum(scores >= 0)
-            Nc[k] = np.sum(targets * (scores >= 0))
-        Np[Np == 0] = 1
-        OP = np.sum(Nc) / np.sum(Np)
-        OR = np.sum(Nc) / np.sum(Ng)
-        OF1 = (2 * OP * OR) / (OP + OR)
+            Ng[k] = np.sum(targets == 1)  # Ground truth positives
+            Np[k] = np.sum(scores >= 0)  # Predicted positives
+            Nc[k] = np.sum(targets * (scores >= 0))  # Correctly predicted positives
+        Np[Np == 0] = 1  # Avoid division by zero
+        OP = np.sum(Nc) / np.sum(Np)  # Overall precision
+        OR = np.sum(Nc) / np.sum(Ng)  # Overall recall
+        OF1 = (2 * OP * OR) / (OP + OR)  # Overall F1-score
 
-        CP = np.sum(Nc / Np) / n_class
-        CR = np.sum(Nc / Ng) / n_class
-        CF1 = (2 * CP * CR) / (CP + CR)
+        CP = np.sum(Nc / Np) / n_class  # Class-wise precision
+        CR = np.sum(Nc / Ng) / n_class  # Class-wise recall
+        CF1 = (2 * CP * CR) / (CP + CR)  # Class-wise F1-score
         return OP, OR, OF1, CP, CR, CF1

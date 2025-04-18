@@ -16,74 +16,77 @@ from tqdm import tqdm
 
 class Trainer(object):
     def __init__(self, model, criterion, train_loader, val_loader, args):
+        # Initialize the trainer with model, criterion, data loaders, and arguments
         self.model = model
         self.criterion = criterion
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.args = args
-        # pprint (self.args)
+
+        # Print the arguments for debugging
         print('--------Args Items----------')
         for k, v in vars(self.args).items():
             print('{}: {}'.format(k, v))
         print('--------Args Items----------\n')
 
     def initialize_optimizer_and_scheduler(self):
+        # Initialize the optimizer (SGD in this case)
         self.optimizer = torch.optim.SGD(self.model.get_config_optim(self.args.lr, self.args.lrp), 
                                         lr=self.args.lr, 
                                         momentum=self.args.momentum, 
                                         weight_decay=self.args.weight_decay)
-        # self.lr_scheduler = lr_scheduler.MultiStepLR(self.optimizer, self.args.epoch_step, gamma=0.1)
 
     def initialize_meters(self):
+        # Initialize meters for tracking loss, precision, and time
         self.meters = {}
-        # meters
         self.meters['loss'] = AverageMeter('loss')
         self.meters['ap_meter'] = AveragePrecisionMeter()
-        # time measure
         self.meters['batch_time'] = AverageMeter('batch_time')
         self.meters['data_time'] = AverageMeter('data_time')
 
     def initialization(self, is_train=False):
-        """ initialize self.model and self.criterion here """
-        
+        """ Initialize model, criterion, optimizer, and meters """
         if is_train:
+            # Initialize training-specific variables
             self.start_epoch = 0
             self.epoch = 0
             self.end_epoch = self.args.epochs
             self.best_score = 0.
             self.lr_now = self.args.lr
 
-            # initialize some settings
+            # Initialize optimizer
             self.initialize_optimizer_and_scheduler()
 
+        # Initialize meters
         self.initialize_meters()
 
-        # load checkpoint if args.resume is a valid checkpint file.
+        # Load checkpoint if resuming from a saved model
         if os.path.isfile(self.args.resume) and self.args.resume.endswith('pth'):
             self.load_checkpoint()
         
+        # Enable CUDA if available
         if torch.cuda.is_available():
             cudnn.benchmark = True
             self.model = torch.nn.DataParallel(self.model).cuda()
             self.criterion = self.criterion.cuda()
-            #     self.train_loader.pin_memory = True
-            # self.val_loader.pin_memory = True
 
     def reset_meters(self):
+        # Reset all meters
         for k, v in self.meters.items():
             self.meters[k].reset()
 
     def on_start_epoch(self):
+        # Reset meters at the start of each epoch
         self.reset_meters()
 
     def on_end_epoch(self, is_train=False):
+        # Perform actions at the end of an epoch
         if is_train:
-            # map = self.meters['ap_meter'].value().mean()
             return 
         else:
-            # map = self.meters['ap_meter'].value().mean()
-            ap =  self.meters['ap_meter'].value()
-            print (ap)
+            # Calculate metrics and print results
+            ap = self.meters['ap_meter'].value()
+            print(ap)
             map = ap.mean()
             loss = self.meters['loss'].average()
             data_time = self.meters['data_time'].average()
@@ -105,6 +108,7 @@ class Trainer(object):
             return map
 
     def on_forward(self, inputs, targets, is_train):
+        # Forward pass through the model
         inputs = Variable(inputs).float()
         targets = Variable(targets).float()
 
@@ -115,10 +119,12 @@ class Trainer(object):
             outputs1, outputs2 = self.model(inputs)
         outputs = (outputs1 + outputs2) / 2
 
+        # Compute loss
         loss = self.criterion(outputs, targets)
         self.meters['loss'].update(loss.item(), inputs.size(0))
 
         if is_train:
+            # Backward pass and optimization
             self.optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.args.max_clip_grad_norm)
@@ -127,7 +133,7 @@ class Trainer(object):
         return outputs
     
     def adjust_learning_rate(self):
-        """ Sets learning rate if it is needed """
+        """ Adjust learning rate based on epoch """
         lr_list = []
         decay = 0.1 if sum(self.epoch == np.array(self.args.epoch_step)) > 0 else 1.0
         for param_group in self.optimizer.param_groups:
@@ -137,21 +143,25 @@ class Trainer(object):
         return np.unique(lr_list)
 
     def train(self):
+        # Training loop
         self.initialization(is_train=True)
         print('train from epoch {}'.format(self.start_epoch + 1))
         print('train to epoch {}'.format(self.end_epoch))
         for epoch in range(self.start_epoch, self.end_epoch):
             self.lr_now = self.adjust_learning_rate()
             print("training epoch {}".format(epoch + 1))
-            print ('Lr: {}'.format(self.lr_now))
+            print('Lr: {}'.format(self.lr_now))
             self.epoch = epoch
-            # train for one epoch
+
+            # Train for one epoch
             self.run_iteration(self.train_loader, is_train=True)
             print("Evaluating epoch {}".format(epoch + 1))
-            # evaluate on validation set
+
+            # Evaluate on validation set
             score = self.run_iteration(self.val_loader, is_train=False)
             print('recording best score')
-            # record best score, save checkpoint and result
+
+            # Save checkpoint and results
             is_best = score > self.best_score
             self.best_score = max(score, self.best_score)
             checkpoint = {
@@ -162,7 +172,6 @@ class Trainer(object):
                 }
             print('saving checkpoint')
             model_dir = self.args.save_dir
-            # assert os.path.exists(model_dir) == True
             self.save_checkpoint(checkpoint, model_dir, is_best)
             self.save_result(model_dir, is_best)
 
@@ -171,6 +180,7 @@ class Trainer(object):
         return self.best_score
 
     def run_iteration(self, data_loader, is_train=True):
+        # Run one iteration (epoch) of training or validation
         self.on_start_epoch()
 
         if not is_train:
@@ -182,46 +192,49 @@ class Trainer(object):
 
         st_time = time.time()
         for i, data in enumerate(data_loader):
-            #print('iter: {}'.format(i))
-            # measure data loading time
+            # Measure data loading time
             data_time = time.time() - st_time
             self.meters['data_time'].update(data_time)
 
-            # inputs, targets, targets_gt, filenames = self.on_start_batch(data)
+            # Extract inputs and targets
             inputs = data['image']
             targets = data['target']
 
-            # for voc
+            # Adjust targets for specific dataset
             labels = targets.clone()
-            targets[targets==0] = 1
-            targets[targets==-1] = 0
+            targets[targets == 0] = 1
+            targets[targets == -1] = 0
 
             if torch.cuda.is_available():
                 inputs = inputs.cuda()
                 targets = targets.cuda()
 
+            # Forward pass
             outputs = self.on_forward(inputs, targets, is_train=is_train)
 
-            # measure elapsed time
+            # Measure elapsed time
             batch_time = time.time() - st_time
             self.meters['batch_time'].update(batch_time)
 
+            # Update metrics
             self.meters['ap_meter'].add(outputs.data, labels.data, data['name'])
             st_time = time.time()
 
+            # Print progress during training
             if is_train and i % self.args.display_interval == 0:
-                print ('{}, {} Epoch, {} Iter, Loss: {:.4f}, Data time: {:.4f}, Batch time: {:.4f}'.format(
-                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  self.epoch+1, i, 
+                print('{}, {} Epoch, {} Iter, Loss: {:.4f}, Data time: {:.4f}, Batch time: {:.4f}'.format(
+                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  self.epoch + 1, i, 
                         self.meters['loss'].value(), self.meters['data_time'].value(), 
                         self.meters['batch_time'].value()))
         print('to on_end_epoch')
         return self.on_end_epoch(is_train=is_train)
 
     def validate(self):
+        # Validation loop
         self.initialization(is_train=False)
-
         map = self.run_iteration(self.val_loader, is_train=False)
 
+        # Save results
         model_dir = os.path.dirname(self.args.resume)
         assert os.path.exists(model_dir) == True
         self.save_result(model_dir, is_best=False)
@@ -229,6 +242,7 @@ class Trainer(object):
         return map
 
     def load_checkpoint(self):
+        # Load a saved checkpoint
         print("* Loading checkpoint '{}'".format(self.args.resume))
         checkpoint = torch.load(self.args.resume)
         self.start_epoch = checkpoint['epoch']
@@ -238,14 +252,14 @@ class Trainer(object):
             if k in model_dict and v.shape == model_dict[k].shape:
                 model_dict[k] = v
             else:
-                print ('\tMismatched layers: {}'.format(k))
+                print('\tMismatched layers: {}'.format(k))
         self.model.load_state_dict(model_dict)
 
     def save_checkpoint(self, checkpoint, model_dir, is_best=False):
+        # Save the current model checkpoint
         if not os.path.exists(model_dir):
             os.makedirs(model_dir)
 
-        # filename = 'Epoch-{}.pth'.format(self.epoch)
         filename = 'checkpoint.pth'
         res_path = os.path.join(model_dir, filename)
         print('Save checkpoint to {}'.format(res_path))
@@ -256,22 +270,20 @@ class Trainer(object):
             shutil.copyfile(res_path, res_path_best)
 
     def save_result(self, model_dir, is_best=False):
+        # Save results to a file
         if not os.path.exists(model_dir):
             os.makedirs(model_dir)
         
-        # filename = 'results.csv' if not is_best else 'best_results.csv'
         filename = 'results.csv'
         res_path = os.path.join(model_dir, filename)
         print('Save results to {}'.format(res_path))
         with open(res_path, 'w') as fid:
             for i in range(self.meters['ap_meter'].scores.shape[0]):
                 fid.write('{},{},{}\n'.format(self.meters['ap_meter'].filenames[i], 
-                    ','.join(map(str,self.meters['ap_meter'].scores[i].numpy())), 
-                    ','.join(map(str,self.meters['ap_meter'].targets[i].numpy()))))
+                    ','.join(map(str, self.meters['ap_meter'].scores[i].numpy())), 
+                    ','.join(map(str, self.meters['ap_meter'].targets[i].numpy()))))
         
         if is_best:
             filename_best = 'output_best.csv'
             res_path_best = os.path.join(model_dir, filename_best)
             shutil.copyfile(res_path, res_path_best)
-
-

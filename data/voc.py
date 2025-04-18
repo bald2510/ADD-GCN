@@ -124,24 +124,42 @@ def write_object_labels_csv(file, labeled_data):
     csvfile.close()
 
 
-def read_object_labels_csv(file, header=True):
+def read_object_labels_csv(file_csv, header=True):
     images = []
-    num_categories = 0
-    print('[dataset] read', file)
-    with open(file, 'r') as f:
+    print(f'[dataset] Reading CSV: {file_csv}')
+    
+    if not os.path.exists(file_csv):
+        raise FileNotFoundError(f"CSV file not found: {file_csv}")
+        
+    with open(file_csv, 'r') as f:
         reader = csv.reader(f)
-        rownum = 0
         for row in reader:
-            if header and rownum == 0:
-                header = row
-            else:
-                if num_categories == 0:
-                    num_categories = len(row) - 1
-                name = row[0]
-                labels = torch.from_numpy((np.asarray(row[1:num_categories + 1])).astype(np.float32))
-                item = (name, labels)
-                images.append(item)
-            rownum += 1
+            if not row:  # Skip empty rows
+                continue
+            try:
+                name = row[0].strip()
+                if not name:
+                    continue
+                labels = [float(x) for x in row[1:21]]  # First 20 columns as labels
+                if len(labels) != 20:
+                    print(f'Warning: Expected 20 labels, got {len(labels)}')
+                    continue
+                images.append((name, torch.tensor(labels)))
+            except Exception as e:
+                print(f'Error processing row {row}: {e}')
+                continue
+                
+    if not images:
+        # Print diagnostic info before raising error
+        print('\nCSV File Contents:')
+        with open(file_csv, 'r') as f:
+            print(f.read())
+        raise ValueError(
+            f"No valid images found in {file_csv}\n"
+            "Expected format: filename,label1,label2,...,label20\n"
+            f"Found {len(images)} valid entries"
+        )
+        
     return images
 
 
