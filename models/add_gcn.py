@@ -81,8 +81,7 @@ class SpatialAttention(nn.Module):
     def __init__(self, kernel_size=7):
         super(SpatialAttention, self).__init__()
 
-        assert kernel_size in (3, 7), 'kernel size must be 3 or 7'
-        padding = 3 if kernel_size == 7 else 1
+        padding = 3
 
         self.conv1 = nn.Conv2d(2, 1, kernel_size, padding=padding, bias=False)
         self.sigmoid = nn.Sigmoid()
@@ -243,22 +242,21 @@ class ImprovedADD_GCN_CBAM(nn.Module):
         x = x.topk(1, dim=-1)[0].mean(dim=-1)
         return x
 
-    def forward_sam(self, x):
-        """ SAM module
-
-        Shape: 
-        - Input: (B, C_in, H, W) # C_in: 2048
-        - Output: (B, C_out, N) # C_out: 1024, N: num_classes
+    def forward_cbam(self, x):
         """
-        mask = self.fc(x)
-        mask = mask.view(mask.size(0), mask.size(1), -1)
-        mask = torch.sigmoid(mask)
-        mask = mask.transpose(1, 2)
+        CBAM module (thay thế SAM)
 
-        x = self.conv_transform(x)
-        x = self.cbam(x)
-        x = x.view(x.size(0), x.size(1), -1)
-        x = torch.matmul(x, mask)
+        Input:
+        - x: (B, 2048, H, W)
+        Output:
+        - x: (B, 1024, N), với N = num_classes
+        """
+        x = self.conv_transform(x)     # B x 1024 x H x W
+        x = self.cbam(x)               # Áp dụng CBAM
+        x = x.view(x.size(0), x.size(1), -1)  # Flatten không gian còn lại -> (B, 1024, H*W)
+        
+        x = x.topk(self.num_classes, dim=2)[0]  # (B, 1024, num_classes)
+        
         return x
 
     def forward_dgcn(self, x):
@@ -270,7 +268,7 @@ class ImprovedADD_GCN_CBAM(nn.Module):
 
         out1 = self.forward_classification_sm(x)
 
-        v = self.forward_sam(x) # B*1024*num_classes
+        v = self.forward_cbam(x) # B*1024*num_classes
         z = self.forward_dgcn(v)
         z = v + z
 

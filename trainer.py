@@ -226,7 +226,6 @@ class Trainer(object):
                         datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  self.epoch + 1, i, 
                         self.meters['loss'].value(), self.meters['data_time'].value(), 
                         self.meters['batch_time'].value()))
-        print('to on_end_epoch')
         return self.on_end_epoch(is_train=is_train)
 
     def validate(self):
