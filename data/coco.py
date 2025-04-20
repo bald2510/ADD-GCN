@@ -5,7 +5,6 @@ from PIL import Image
 # import numpy as np
 import torch
 from torch.utils.data import Dataset
-import pickle
 import random
 
 urls = {'train_img':'http://images.cocodataset.org/zips/train2014.zip',
@@ -13,12 +12,22 @@ urls = {'train_img':'http://images.cocodataset.org/zips/train2014.zip',
         'annotations':'http://images.cocodataset.org/annotations/annotations_trainval2014.zip'}
 
 def download_coco2014(root, phase):
+    '''
+    Download COCO 2014 dataset and extract it.
+    Args:
+        root (str): Root directory of dataset.
+        phase (str): train or val.
+    '''
+    
+    # check if the root directory exists
     work_dir = os.getcwd()
     tmpdir = os.path.join(root, 'tmp/')
     if not os.path.exists(root):
         os.makedirs(root)
     if not os.path.exists(tmpdir):
         os.makedirs(tmpdir)
+        
+    # check if the dataset is already downloaded
     if phase == 'train':
         filename = 'train2014.zip'
     elif phase == 'val':
@@ -29,7 +38,8 @@ def download_coco2014(root, phase):
         os.chdir(tmpdir)
         subprocess.call('wget ' + urls[phase + '_img'], shell=True)
         os.chdir(root)
-    # extract file
+    
+    # check if the dataset is already extracted, extract file if needed
     img_data = os.path.join(root, filename.split('.')[0])
     if not os.path.exists(img_data):
         print('[dataset] Extracting tar file {file} to {path}'.format(file=cached_file, path=root))
@@ -38,11 +48,12 @@ def download_coco2014(root, phase):
     print('[dataset] Done!')
 
     # train/val images/annotations
+    # check if the annotations are already downloaded
+    # if not, download and extract them
     cached_file = os.path.join(tmpdir, 'annotations_trainval2014.zip')
     if not os.path.exists(cached_file):
         print('Downloading: "{}" to {}\n'.format(urls['annotations'], cached_file))
         os.chdir(tmpdir)
-        # subprocess.Popen('wget ' + urls['annotations'], shell=True)
         subprocess.call('wget ' + urls['annotations'], shell=True)
         os.chdir(root)
     annotations_data = os.path.join(root, 'annotations')
@@ -52,6 +63,18 @@ def download_coco2014(root, phase):
         os.system(command)
     print('[annotation] Done!')
 
+    ''' 
+    Check if the annotations are already generated. if not, generate them
+    
+    Generation of annotations: 
+        1. load the annotations file
+        2. get the category id and category name
+        3. get the image id and image name
+        4. get the annotations for each image
+        5. save the annotations in a json file
+        6. save the category id and category name in a json file
+        7. save the image id and image name in a json file
+    '''
     annotations_data = os.path.join(root, 'annotations')
     anno = os.path.join(root, '{}_anno.json'.format(phase))
     img_id = {}
@@ -93,6 +116,14 @@ def download_coco2014(root, phase):
     os.chdir(work_dir)
 
 def categoty_to_idx(category):
+    '''
+    Convert category to index.
+    
+    Args:
+        category (list): List of category names.
+    Returns:
+        dict: Dictionary of category names and their corresponding index.
+    '''
     cat2idx = {}
     for cat in category:
         cat2idx[cat] = len(cat2idx)
@@ -100,6 +131,14 @@ def categoty_to_idx(category):
 
 
 class COCO2014(Dataset):
+    '''
+    COCO2014 dataset for classification.
+    Args:
+        root (str): Root directory of dataset.
+        transform (callable, optional): Optional transform to be applied on a sample.
+        phase (str): train or val.
+    '''
+    
     def __init__(self, root, transform=None, phase='train'):
         self.root = os.path.abspath(root)
         self.phase = phase
@@ -131,5 +170,3 @@ class COCO2014(Dataset):
         target[labels] = 1
         data = {'image':img, 'name': filename, 'target': target}
         return data
-        # return image, target
-        # return (img, filename), target
